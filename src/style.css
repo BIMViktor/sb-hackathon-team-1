@@ -240,6 +240,7 @@ body.wide .filters input { grid-column: auto; }
 
 .batch {
   position: sticky;
+  z-index: 6;
   bottom: 8px;
   display: flex;
   flex-wrap: wrap;
@@ -458,3 +459,6 @@ legend { padding: 0 4px; color: var(--muted); font-size: 12px; }
 .chip.inherited { border: 1px dashed var(--faint); background: transparent; }
 .chip.inherited small { color: var(--muted); font-size: 11px; }
 .mx td.inherited::after { content: "↑"; margin-left: 2px; color: var(--muted); font-size: 11px; vertical-align: top; }
+.pick-list { max-height: 30vh; margin-top: 6px; }
+.pick-list label[hidden] { display: none; }
+fieldset > input[type="search"] { width: 100%; }

@@ -11,6 +11,7 @@ import {
   WRITE_GAP_MS,
   addMemberOp,
   addToGroupOp,
+  createGroupOp,
   lastAdminKept,
   levelName,
   liveRest,
@@ -436,16 +437,34 @@ function parseImport(text) {
   return rows;
 }
 
-function buildImportOps(entries, defaultLevel, invite) {
-  const projectId = state.data.projectId;
+/**
+ * Add or update the pasted users in one project. `groupNames` (ticked in the
+ * dialog) apply to everyone, on top of each row's own groups column. A group
+ * missing in the project is created first, with its first new member as admin.
+ */
+function buildImportOps(data, projectName, prefix, entries, defaultLevel, invite, groupNames) {
+  const projectId = data.projectId;
   const ops = [];
   const skipped = [];
-  const findGroup = (name) => {
-    const key = name.replace(/^@/, "").toLowerCase();
-    return writableGroups().find((group) => group.name.replace(/^@/, "").toLowerCase() === key);
+  const writable = data.groups.filter((group) => !group.readOnly);
+  const key = (name) => name.replace(/^@/, "").toLowerCase();
+  const created = new Map();
+  const groupFor = (name, fromDialog) => {
+    const found = writable.find((group) => key(group.name) === key(name));
+    if (found) return { group: found };
+    if (!fromDialog) return null;
+    if (!created.has(key(name))) {
+      const group = { id: null, name: name.startsWith("@") ? name : `@${name}` };
+      created.set(key(name), group);
+      ops.push(createGroupOp(projectId, projectName, group));
+      return { group, first: true };
+    }
+    return { group: created.get(key(name)) };
   };
+  const label = (text) => (prefix ? `${projectName}: ${text}` : text);
+
   for (const entry of entries) {
-    const row = state.data.rowByEmail.get(entry.email);
+    const row = data.rowByEmail.get(entry.email);
     const org = entry.organization ? orgByName(entry.organization) : null;
     if (row) {
       const attrs = {};
@@ -454,7 +473,8 @@ function buildImportOps(entries, defaultLevel, invite) {
       if (entry.organization && entry.organization !== row.organization) attrs.organization = org?.name ?? entry.organization;
       if (entry.title && entry.title !== row.title) attrs.title = entry.title;
       if (entry.level != null && entry.level !== row.level && !isMe(row)) Object.assign(attrs, { "privilege-level": entry.level, guest: entry.level === 5 });
-      if (Object.keys(attrs).length) ops.push(patchMemberOp(projectId, row, attrs, attrs.organization && org ? org.id : undefined, "Uppdatera befintlig"));
+      if (Object.keys(attrs).length)
+        ops.push(patchMemberOp(projectId, row, attrs, attrs.organization && org ? org.id : undefined, label("Uppdatera befintlig")));
     } else {
       const level = entry.level ?? defaultLevel;
       ops.push(
@@ -472,14 +492,21 @@ function buildImportOps(entries, defaultLevel, invite) {
             "send-invitation": invite,
           },
           org?.id,
-          `Lägg till som ${levelName(level)}${invite ? " + inbjudan" : ""}`,
+          label(`Lägg till som ${levelName(level)}${invite ? " + inbjudan" : ""}`),
         ),
       );
     }
-    for (const name of entry.groups) {
-      const group = findGroup(name);
-      if (!group) skipped.push(`${entry.email}: gruppen ${name} finns inte`);
-      else if (!row?.groups.has(group.id)) ops.push(addToGroupOp(projectId, entry.email, group));
+    const wanted = new Map();
+    for (const name of groupNames) wanted.set(key(name), [name, true]);
+    for (const name of entry.groups) if (!wanted.has(key(name))) wanted.set(key(name), [name, false]);
+    for (const [name, fromDialog] of wanted.values()) {
+      const hit = groupFor(name, fromDialog);
+      if (!hit) skipped.push(`${entry.email}: gruppen ${name} finns inte i ${projectName}`);
+      else if (!row?.groups.has(hit.group.id) || !hit.group.id) {
+        const op = addToGroupOp(projectId, entry.email, hit.group, Boolean(hit.first));
+        op.label = label(op.label);
+        ops.push(op);
+      }
     }
   }
   return { ops, skipped };
@@ -590,30 +617,80 @@ function openEdit(row) {
 }
 
 function openImport() {
+  const current = state.data.projectId;
+  const others = state.projects.filter((p) => p.id !== current && !p.inactive);
+  const currentName = state.projects.find((p) => p.id === current)?.name ?? `Projekt ${current}`;
   openSheet(
-    "Lägg till och uppdatera",
+    "Lägg till användare",
     `
     <form id="import-form" class="form">
-      <p class="muted">En användare per rad. Kolumner (semikolon, komma eller tabb):<br/>
-      <code>e-post;förnamn;efternamn;organisation;titel;roll;grupper</code><br/>
-      Roll som namn eller nivå (Gäst, Användare, Projektadmin…). Flera grupper skiljs med <code>|</code>.
-      Befintliga användare uppdateras bara i ifyllda fält. Klistra gärna in från Excel.</p>
-      <textarea name="text" rows="8" placeholder="kalle@firma.se;Kalle;Ek;Firma AB;Konstruktör;Användare;@Projektering|@Produktion"></textarea>
+      <p class="muted">E-post, en per rad, eller klistra in från Excel:
+      <code>e-post;förnamn;efternamn;organisation;titel;roll;grupper</code>.
+      Roll som namn eller nivå (Gäst, Användare, Projektadmin…). Grupper per rad skiljs med <code>|</code>.
+      Befintliga användare uppdateras bara i ifyllda fält.</p>
+      <textarea name="text" rows="6" placeholder="kalle@firma.se;Kalle;Ek;Firma AB;Konstruktör;Användare"></textarea>
       <div class="two">
         <label>Roll om tom<select name="level">${ASSIGNABLE_LEVELS.filter(([v]) => v > 0)
           .map(([v, n]) => option(v, n, v === 10))
           .join("")}</select></label>
         <label class="check inline"><input type="checkbox" name="invite" /> Skicka inbjudningsmejl till nya</label>
       </div>
+      <fieldset><legend>Projekt</legend>
+        <input id="imp-psearch" type="search" placeholder="Sök projekt…" />
+        <div id="imp-plist" class="mx-plist pick-list">
+          <label><input type="checkbox" checked disabled /><span><b>${esc(currentName)}</b> <span class="muted">(det här projektet)</span></span></label>
+          ${others.map((p) => `<label data-name="${esc(p.name.toLowerCase())}"><input type="checkbox" name="p" value="${esc(p.id)}" /><span>${esc(p.name)}</span></label>`).join("")}
+        </div>
+      </fieldset>
+      <fieldset><legend>Grupper, i alla valda projekt</legend>
+        <div class="mx-plist pick-list">
+          ${writableGroups()
+            .map(
+              (g) => `<label style="padding-left:${6 + g.depth * 18}px"><input type="checkbox" name="g" value="${esc(g.name)}" /><span>${g.depth ? "└ " : ""}${esc(g.name)}</span></label>`,
+            )
+            .join("") || `<p class="muted">Projektet har inga egna grupper.</p>`}
+        </div>
+        <p class="muted">Saknas en grupp i ett annat projekt skapas den där, med första användaren som gruppadmin.</p>
+      </fieldset>
       <div class="sheet-actions"><button class="primary" type="submit">Förhandsgranska</button></div>
     </form>`,
   );
-  el.sheetBody.querySelector("#import-form").addEventListener("submit", (event) => {
+  const form = el.sheetBody.querySelector("#import-form");
+  form.querySelector("#imp-psearch").addEventListener("input", (event) => {
+    const query = event.target.value.trim().toLowerCase();
+    for (const label of form.querySelectorAll("#imp-plist label[data-name]")) {
+      label.hidden = Boolean(query) && !label.dataset.name.includes(query) && !label.querySelector("input").checked;
+    }
+  });
+  form.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const form = event.currentTarget;
     const entries = parseImport(form.elements.text.value);
     if (!entries.length) return log("Hittade inga rader med e-postadress.", "error");
-    const { ops, skipped } = buildImportOps(entries, Number(form.elements.level.value), form.elements.invite.checked);
+    const level = Number(form.elements.level.value);
+    const invite = form.elements.invite.checked;
+    const groupNames = [...form.querySelectorAll('input[name="g"]:checked')].map((box) => box.value);
+    const targets = [current, ...[...form.querySelectorAll('input[name="p"]:checked')].map((box) => box.value)];
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = true;
+    const ops = [];
+    const skipped = [];
+    for (const [i, id] of targets.entries()) {
+      const name = state.projects.find((p) => p.id === id)?.name ?? `Projekt ${id}`;
+      let data = id === current ? state.data : null;
+      if (!data) {
+        button.textContent = `Läser ${name} (${i}/${targets.length - 1})…`;
+        try {
+          data = await loadProject(ctx.rest, id);
+        } catch {
+          skipped.push(`${name}: kan inte läsas, du behöver vara projektadmin där`);
+          continue;
+        }
+      }
+      const built = buildImportOps(data, name, targets.length > 1, entries, level, invite, groupNames);
+      ops.push(...built.ops);
+      skipped.push(...built.skipped);
+    }
+    button.disabled = false;
     showPreview(ops, skipped);
   });
 }
