@@ -27,7 +27,7 @@ import {
 import { createMatrix } from "./matrix.js";
 import { mockMe, mockProjects } from "./mock-users.js";
 import { connectWidget } from "./streambim.js";
-import { esc, option } from "./ui.js";
+import { createLoader, esc, option } from "./ui.js";
 import "./style.css";
 
 const $ = (selector) => document.querySelector(selector);
@@ -134,11 +134,13 @@ async function connect() {
 
 /* ---------- loading ---------- */
 
-async function loadAll(projectId) {
-  el.list.innerHTML = `<p class="empty">Laddar…</p>`;
+async function loadAll(projectId, loader) {
+  const name = state.projects.find((p) => p.id === projectId)?.name ?? `projekt ${projectId}`;
+  loader ??= createLoader(el.list, `Läser ${name}`);
+  loader.title(`Läser ${name}`);
   state.selected.clear();
   try {
-    state.data = await loadProject(ctx.rest, projectId);
+    state.data = await loadProject(ctx.rest, projectId, loader.track);
     log(`${state.data.rows.length} medlemmar, ${state.data.groups.length} grupper.`);
   } catch (error) {
     state.data = null;
@@ -809,9 +811,39 @@ el.tabs.addEventListener("click", (event) => {
 
 const modeLabel = { mock: "Lokalt", live: "Live", error: "Ingen kontakt" };
 
+/** Project and organisation lists change rarely: show the last copy at once, refresh behind it. */
+const cache = {
+  read(key) {
+    try {
+      return JSON.parse(localStorage.getItem(`um:${key}`) ?? "null");
+    } catch {
+      return null;
+    }
+  },
+  write(key, value) {
+    try {
+      localStorage.setItem(`um:${key}`, JSON.stringify(value));
+    } catch {
+      /* storage blocked or full: just skip the cache */
+    }
+  },
+};
+
+function setProjects(projects) {
+  state.projects = projects;
+  renderProjects(el.project.value || ctx.projectId);
+  renderActionFields();
+}
+
+function setOrgs(orgs) {
+  state.orgs = orgs;
+  el.orgList.innerHTML = orgs.map((org) => `<option value="${esc(org.name)}"></option>`).join("");
+}
+
 (async () => {
+  const loader = createLoader(el.list, "Startar användarhanteraren");
   try {
-    await connect();
+    await loader.track("Ansluter till StreamBIM", connect());
   } catch (error) {
     el.status.dataset.mode = "error";
     el.status.textContent = modeLabel.error;
@@ -820,12 +852,28 @@ const modeLabel = { mock: "Lokalt", live: "Live", error: "Ingen kontakt" };
   }
   el.status.dataset.mode = ctx.mode;
   el.status.textContent = modeLabel[ctx.mode] || ctx.mode;
-  renderProjects(ctx.projectId);
-  const [projects, orgs] = await Promise.allSettled([loadProjects(ctx.rest), loadOrganizations(ctx.rest)]);
-  state.projects = projects.status === "fulfilled" ? projects.value : [];
-  state.orgs = orgs.status === "fulfilled" ? orgs.value : [];
-  el.orgList.innerHTML = state.orgs.map((org) => `<option value="${esc(org.name)}"></option>`).join("");
-  renderProjects(ctx.projectId);
-  await loadAll(ctx.projectId);
+
+  const projectsKey = `projects:${ctx.mode}:${ctx.userEmail}`;
+  const orgsKey = `orgs:${ctx.mode}`;
+  if (cache.read(projectsKey)) setProjects(cache.read(projectsKey));
+  else renderProjects(ctx.projectId);
+  if (cache.read(orgsKey)) setOrgs(cache.read(orgsKey));
+
+  // The member list does not wait for the project and organisation lists.
+  loader
+    .track("Projektlista", loadProjects(ctx.rest))
+    .then((projects) => {
+      cache.write(projectsKey, projects);
+      setProjects(projects);
+    })
+    .catch(() => {});
+  loader
+    .track("Organisationer", loadOrganizations(ctx.rest))
+    .then((orgs) => {
+      cache.write(orgsKey, orgs);
+      setOrgs(orgs);
+    })
+    .catch(() => {});
+  await loadAll(ctx.projectId, loader);
   renderActionFields();
 })();

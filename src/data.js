@@ -230,13 +230,13 @@ export async function loadOrganizations(rest) {
  * Members, groups and memberships for one project, joined into rows.
  * Four reads, run together.
  */
-export async function loadProject(rest, projectId) {
+export async function loadProject(rest, projectId, track = (label, promise) => promise) {
   const root = base(projectId);
   const [members, users, groups, groupMembers] = await Promise.all([
-    rest(`${root}/project-members`),
-    rest(`${root}/users`).catch(() => ({ data: [] })),
-    rest(`${root}/groups`),
-    rest(`${root}/group-members`),
+    track("Medlemmar", rest(`${root}/project-members`)),
+    track("Användarprofiler", rest(`${root}/users`)).catch(() => ({ data: [] })),
+    track("Grupper", rest(`${root}/groups`)),
+    track("Gruppmedlemskap", rest(`${root}/group-members`)),
   ]);
 
   const userById = new Map((users?.data ?? []).map((u) => [u.id, u.attributes ?? {}]));
