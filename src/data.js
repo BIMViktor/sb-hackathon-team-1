@@ -245,7 +245,8 @@ export async function loadProject(rest, projectId) {
       email,
       given,
       family,
-      name: `${given} ${family}`.trim() || u.name || "",
+      // StreamBIM reports "@" as the name of users who never filled one in.
+      name: `${given} ${family}`.trim() || (/\p{L}/u.test(u.name ?? "") ? u.name : ""),
       organization: a.organization || u.organization || "",
       orgId: relId(m, "user-organization"),
       title: a.title || u.title || "",

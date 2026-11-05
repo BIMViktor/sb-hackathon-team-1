@@ -72,6 +72,14 @@ function connectLive(handlers) {
     };
     const timer = setTimeout(() => finish(null), CONNECT_TIMEOUT_MS);
 
+    // connectToParent only trusts new URL(document.referrer).origin. An https
+    // StreamBIM page loading http://localhost sends no referrer, so the
+    // handshake is rejected. Fall back to the embedding origin.
+    const parentOrigin = location.ancestorOrigins?.[0];
+    if (!document.referrer && parentOrigin && /^https:\/\/([a-z0-9-]+\.)?streambim\.com$/.test(parentOrigin)) {
+      Object.defineProperty(document, "referrer", { value: parentOrigin, configurable: true });
+    }
+
     try {
       window.StreamBIM
         .connectToParent(window.parent, {
