@@ -99,7 +99,7 @@ function loadWidgetApi() {
   });
 }
 
-async function connect() {
+async function connect(loader) {
   const params = new URLSearchParams(location.search);
   const popout = params.has("popout");
   if (popout) {
@@ -107,23 +107,26 @@ async function connect() {
     el.popout.hidden = true;
     const bridge = connectBridge();
     if (!bridge) throw new Error("Öppna det stora fönstret från widgeten i StreamBIM.");
-    Object.assign(ctx, await bridge.context(), { rest: bridge.rest });
+    Object.assign(ctx, await loader.track("Kopplar till widgeten i StreamBIM", bridge.context()), { rest: bridge.rest });
     return;
   }
   if (params.has("mock")) {
+    await loader.track("Startar med testdata", Promise.resolve());
     Object.assign(ctx, { rest: mockRest(), projectId: mockProjects[0].id, userEmail: mockMe, mode: "mock" });
     serveBridge(() => ctx);
     return;
   }
-  await loadWidgetApi();
-  const client = await connectWidget({});
+  await loader.track("Laddar widget-API", loadWidgetApi());
+  const client = await loader.track(
+    "Väntar på svar från StreamBIM",
+    connectWidget({}).then((c) => (c.mode === "error" ? Promise.reject(new Error(c.reason)) : c)),
+  );
   if (client.mode === "live") {
-    Object.assign(ctx, {
-      rest: liveRest(client.api),
-      projectId: String(await client.getProjectId()),
-      userEmail: String(await client.getUserEmail()),
-      mode: "live",
-    });
+    const [projectId, userEmail] = await loader.track(
+      "Läser projekt och användare",
+      Promise.all([client.getProjectId(), client.getUserEmail()]),
+    );
+    Object.assign(ctx, { rest: liveRest(client.api), projectId: String(projectId), userEmail: String(userEmail), mode: "live" });
   } else if (client.mode === "mock") {
     Object.assign(ctx, { rest: mockRest(), projectId: mockProjects[0].id, userEmail: mockMe, mode: "mock" });
   } else {
@@ -141,6 +144,7 @@ async function loadAll(projectId, loader) {
   state.selected.clear();
   try {
     state.data = await loadProject(ctx.rest, projectId, loader.track);
+    await loader.idle();
     log(`${state.data.rows.length} medlemmar, ${state.data.groups.length} grupper.`);
   } catch (error) {
     state.data = null;
@@ -843,7 +847,7 @@ function setOrgs(orgs) {
 (async () => {
   const loader = createLoader(el.list, "Startar användarhanteraren");
   try {
-    await loader.track("Ansluter till StreamBIM", connect());
+    await connect(loader);
   } catch (error) {
     el.status.dataset.mode = "error";
     el.status.textContent = modeLabel.error;
