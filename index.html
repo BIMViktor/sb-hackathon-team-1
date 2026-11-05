@@ -3,35 +3,73 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Team 1</title>
+    <title>Användare</title>
   </head>
   <body>
-    <div class="frame">
-      <header>
+    <div class="app">
+      <header class="top">
         <div>
-          <p class="kicker">StreamBIM hackathon</p>
-          <h1>Team 1</h1>
+          <p class="kicker">StreamBIM · Team 1</p>
+          <h1>Användare</h1>
         </div>
-        <p id="status" class="status">Ansluter…</p>
+        <div class="top-actions">
+          <span id="status" class="status">Ansluter…</span>
+          <button id="popout" type="button" class="ghost" title="Öppna i ett eget, större fönster">Stort fönster ↗</button>
+        </div>
       </header>
 
-      <p class="lead">Klicka på något i modellen.</p>
-      <p class="note">Namn, typ och våning visas här, och objektet markeras i vyn. Ändra src/main.js och src/style.css. Låt src/streambim.js vara. Inga nya paket. En push till main syns efter ungefär en minut.</p>
+      <div class="project-row">
+        <select id="project" aria-label="Projekt"></select>
+        <button id="reload" type="button" class="ghost icon" title="Läs om">↻</button>
+      </div>
 
-      <section class="card">
-        <p id="empty">Inget valt ännu.</p>
-        <div id="facts" hidden>
-          <p id="name" class="name">–</p>
-          <p class="row"><span>Typ</span><b id="type">–</b></p>
-          <p class="row"><span>Våning</span><b id="floor">–</b></p>
-        </div>
-      </section>
+      <div class="filters">
+        <input id="search" type="search" placeholder="Sök namn, e-post, organisation, titel…" />
+        <select id="f-level" aria-label="Roll"></select>
+        <select id="f-group" aria-label="Grupp"></select>
+        <select id="f-org" aria-label="Organisation"></select>
+      </div>
 
-      <section id="simulator" class="simulator" hidden>
-        <p>Lokalt finns ingen modell. Klicka ett prov.</p>
-        <div id="object-chips" class="chips"></div>
-      </section>
+      <div class="summary">
+        <label class="check"><input id="select-all" type="checkbox" /> <span id="count">–</span></label>
+        <span class="tools">
+          <button id="import" type="button" class="ghost">+ Lägg till</button>
+          <button id="export" type="button" class="ghost">Exportera</button>
+        </span>
+      </div>
+
+      <div id="list" class="list"><p class="empty">Laddar…</p></div>
+
+      <div id="batch" class="batch" hidden>
+        <span id="batch-count" class="batch-count"></span>
+        <select id="action" aria-label="Åtgärd">
+          <option value="level">Sätt roll</option>
+          <option value="org">Sätt organisation</option>
+          <option value="title">Sätt titel</option>
+          <option value="addGroup">Lägg till i grupp</option>
+          <option value="removeGroup">Ta bort från grupp</option>
+          <option value="copy">Kopiera till projekt</option>
+          <option value="deactivate">Inaktivera</option>
+        </select>
+        <span id="action-fields" class="action-fields"></span>
+        <button id="preview" type="button" class="primary">Förhandsgranska</button>
+        <button id="clear" type="button" class="ghost">Avmarkera</button>
+      </div>
+
+      <p id="log" class="log"></p>
     </div>
+
+    <div id="sheet" class="sheet" hidden>
+      <div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+        <header>
+          <h2 id="sheet-title"></h2>
+          <button id="sheet-close" type="button" class="ghost icon" title="Stäng">✕</button>
+        </header>
+        <div id="sheet-body" class="sheet-body"></div>
+      </div>
+    </div>
+
+    <datalist id="org-list"></datalist>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>
