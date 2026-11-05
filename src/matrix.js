@@ -8,13 +8,16 @@ import { WRITE_GAP_MS, addMemberOp, addToGroupOp, createGroupOp, loadProject, re
 import { esc } from "./ui.js";
 
 const MAX_PROJECTS = 15;
+/** Projects ticked from the start besides the open one (hackathon test projects). */
+const DEFAULT_PROJECTS = /^användarhantering/i;
 const NEW_MEMBER_LEVEL = 10;
 
 export function createMatrix({ root, rest, projects, currentProjectId, showPreview, log }) {
   const state = {
-    picked: new Set([currentProjectId]),
+    picked: new Set([currentProjectId, ...projects.filter((p) => DEFAULT_PROJECTS.test(p.name)).map((p) => p.id)].slice(0, MAX_PROJECTS)),
     loaded: new Map(),
     groupName: "",
+    groupNames: [],
     shown: [],
     changes: new Map(),
     filter: "",
@@ -22,19 +25,23 @@ export function createMatrix({ root, rest, projects, currentProjectId, showPrevi
 
   root.innerHTML = `
     <div class="mx-controls">
-      <label class="mx-field">Grupp
-        <input id="mx-group" list="mx-groups" placeholder="t.ex. @Projektering_El" autocomplete="off" />
-      </label>
-      <details id="mx-picker" class="mx-picker">
-        <summary id="mx-picked">Projekt</summary>
-        <div class="mx-picker-body">
-          <input id="mx-psearch" type="search" placeholder="Sök projekt…" />
-          <div id="mx-plist" class="mx-plist"></div>
-        </div>
-      </details>
+      <div class="mx-field mx-combo">
+        <label for="mx-group">Grupp</label>
+        <input id="mx-group" placeholder="Välj eller skriv en grupp" autocomplete="off" />
+        <div id="mx-gpop" class="mx-pop mx-plist" hidden></div>
+      </div>
+      <div class="mx-field">
+        <span>Projekt</span>
+        <details id="mx-picker" class="mx-picker">
+          <summary id="mx-picked">Projekt</summary>
+          <div class="mx-pop">
+            <input id="mx-psearch" type="search" placeholder="Sök projekt…" />
+            <div id="mx-plist" class="mx-plist"></div>
+          </div>
+        </details>
+      </div>
       <button id="mx-show" type="button" class="primary">Visa</button>
     </div>
-    <datalist id="mx-groups"></datalist>
     <div id="mx-head" class="mx-head" hidden>
       <input id="mx-filter" type="search" placeholder="Filtrera användare…" />
       <span id="mx-legend" class="muted">☐ med i projektet · <span class="mx-out-dot"></span> inte med i projektet ännu</span>
@@ -76,8 +83,9 @@ export function createMatrix({ root, rest, projects, currentProjectId, showPrevi
     $("#mx-plist").innerHTML = projects
       .filter((p) => !p.inactive && (!query || p.name.toLowerCase().includes(query) || state.picked.has(p.id)))
       .map(
-        (p) => `<label class="check"><input type="checkbox" value="${esc(p.id)}" ${state.picked.has(p.id) ? "checked" : ""} />
-          ${esc(p.name)}${p.id === currentProjectId ? ` <span class="muted">(öppet)</span>` : ""}</label>`,
+        (p) => `<label><input type="checkbox" value="${esc(p.id)}" ${state.picked.has(p.id) ? "checked" : ""} /><span>${esc(p.name)}${
+          p.id === currentProjectId ? ` <span class="muted">(öppet)</span>` : ""
+        }</span></label>`,
       )
       .join("");
     $("#mx-picked").textContent = `Projekt (${state.picked.size} valda)`;
@@ -98,11 +106,42 @@ export function createMatrix({ root, rest, projects, currentProjectId, showPrevi
   function renderGroupNames() {
     const names = new Set();
     for (const data of state.loaded.values()) for (const g of data.groups) if (!g.readOnly) names.add(g.name);
-    $("#mx-groups").innerHTML = [...names]
-      .sort((a, b) => a.localeCompare(b, "sv"))
-      .map((name) => `<option value="${esc(name)}"></option>`)
-      .join("");
+    state.groupNames = [...names].sort((a, b) => a.localeCompare(b, "sv"));
+    if (!$("#mx-gpop").hidden) renderGroupPop();
   }
+
+  /* ---------- group combobox: same look as the project picker ---------- */
+
+  function renderGroupPop() {
+    const typed = $("#mx-group").value.trim();
+    const query = typed.toLowerCase();
+    const matches = state.groupNames.filter((name) => !query || name.toLowerCase().includes(query));
+    const exact = state.groupNames.some((name) => name.toLowerCase() === query);
+    $("#mx-gpop").innerHTML =
+      matches.map((name) => `<button type="button" class="mx-opt" data-name="${esc(name)}">${esc(name)}</button>`).join("") +
+      (typed && !exact
+        ? `<button type="button" class="mx-opt new" data-name="${esc(typed)}">Ny grupp: <b>${esc(typed)}</b></button>`
+        : "") +
+      (!matches.length && !typed ? `<p class="muted">Inga grupper inlästa än.</p>` : "");
+    $("#mx-gpop").hidden = false;
+  }
+
+  $("#mx-group").addEventListener("focus", () => {
+    $("#mx-picker").open = false;
+    renderGroupPop();
+  });
+  $("#mx-group").addEventListener("input", renderGroupPop);
+  $("#mx-group").addEventListener("blur", () => setTimeout(() => ($("#mx-gpop").hidden = true), 120));
+  $("#mx-gpop").addEventListener("mousedown", (event) => {
+    const opt = event.target.closest(".mx-opt");
+    if (!opt) return;
+    event.preventDefault();
+    $("#mx-group").value = opt.dataset.name;
+    $("#mx-gpop").hidden = true;
+  });
+  $("#mx-picker").addEventListener("toggle", () => {
+    if ($("#mx-picker").open) $("#mx-gpop").hidden = true;
+  });
 
   /* ---------- loading ---------- */
 
@@ -283,7 +322,13 @@ export function createMatrix({ root, rest, projects, currentProjectId, showPrevi
     render();
   });
   $("#mx-show").addEventListener("click", show);
-  $("#mx-group").addEventListener("keydown", (event) => event.key === "Enter" && show());
+  $("#mx-group").addEventListener("keydown", (event) => {
+    if (event.key === "Escape") $("#mx-gpop").hidden = true;
+    if (event.key === "Enter") {
+      $("#mx-gpop").hidden = true;
+      show();
+    }
+  });
 
   renderPicker();
   ensureLoaded([currentProjectId]);

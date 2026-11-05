@@ -366,10 +366,10 @@ legend { padding: 0 4px; color: var(--muted); font-size: 12px; }
 /* ---------- group × project ---------- */
 
 .mx-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px; }
-.mx-field { display: flex; flex: 1 1 200px; flex-direction: column; gap: 3px; color: var(--muted); font-size: 12px; }
-.mx-field input { color: var(--ink); font-size: 14px; }
+.mx-field { position: relative; display: flex; flex: 1 1 180px; flex-direction: column; gap: 3px; color: var(--muted); font-size: 12px; }
+.mx-field input, .mx-field summary { color: var(--ink); font-size: 14px; }
 
-.mx-picker { position: relative; flex: 1 1 160px; }
+.mx-picker { position: relative; }
 .mx-picker summary {
   padding: 6px 8px;
   border: 1px solid var(--line);
@@ -379,7 +379,7 @@ legend { padding: 0 4px; color: var(--muted); font-size: 12px; }
   list-style: none;
 }
 .mx-picker summary::after { content: " ▾"; color: var(--faint); }
-.mx-picker-body {
+.mx-pop {
   position: absolute;
   z-index: 5;
   top: calc(100% + 4px);
@@ -392,8 +392,17 @@ legend { padding: 0 4px; color: var(--muted); font-size: 12px; }
   background: var(--card);
   box-shadow: 0 8px 24px rgb(20 40 70 / 0.18);
 }
-.mx-picker-body input { width: 100%; }
-.mx-plist { display: flex; flex-direction: column; gap: 4px; max-height: 50vh; margin-top: 6px; overflow-y: auto; font-size: 13px; }
+.mx-pop > input { width: 100%; margin-bottom: 6px; }
+.mx-pop[hidden] { display: none; }
+.mx-combo .mx-pop { top: 100%; }
+.mx-plist { display: flex; flex-direction: column; gap: 2px; max-height: 50vh; overflow-y: auto; font-size: 13px; }
+.mx-opt { justify-content: flex-start; width: 100%; padding: 4px 6px; border: 0; background: transparent; color: var(--ink); text-align: left; white-space: normal; }
+.mx-opt:hover { background: #edf1f5; }
+.mx-opt.new { color: var(--warn); }
+.mx-plist .muted { margin: 4px 6px; }
+.mx-plist label { display: flex; align-items: flex-start; gap: 8px; padding: 4px 6px; border-radius: 4px; color: var(--ink); text-align: left; cursor: pointer; }
+.mx-plist label:hover { background: #edf1f5; }
+.mx-plist input { flex: none; margin: 2px 0 0; }
 
 .mx-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; font-size: 12px; }
 .mx-head[hidden] { display: none; }
