@@ -79,7 +79,8 @@ function log(message, kind = "") {
 }
 
 const writableGroups = () => (state.data?.groups ?? []).filter((group) => !group.readOnly);
-const groupById = (id) => state.data?.groups.find((group) => group.id === id);
+const groupById = (id) => state.data?.groupById.get(id);
+const treeLabel = (g) => `${"\u00a0\u00a0\u00a0".repeat(g.depth)}${g.depth ? "└ " : ""}${g.name}`;
 const orgByName = (name) => state.orgs.find((org) => org.name.toLowerCase() === String(name).trim().toLowerCase());
 const shortDate = (iso) => (iso ? new Date(iso).toLocaleDateString("sv-SE") : "–");
 const isMe = (row) => row.email.toLowerCase() === ctx.userEmail.toLowerCase();
@@ -162,7 +163,7 @@ function renderFilters() {
   el.fGroup.innerHTML =
     option("", "Alla grupper") +
     option("__none", "Utan egen grupp") +
-    (state.data?.groups ?? []).map((g) => option(g.id, g.name)).join("");
+    (state.data?.groups ?? []).map((g) => option(g.id, treeLabel(g))).join("");
   const orgs = [...new Set((state.data?.rows ?? []).map((row) => row.organization).filter(Boolean))].sort((a, b) =>
     a.localeCompare(b, "sv"),
   );
@@ -184,7 +185,7 @@ function filteredRows() {
   return rows.filter((row) => {
     if (level !== "" && row.level !== Number(level)) return false;
     if (group === "__none" && [...row.groups.keys()].some((id) => ownGroups.has(id))) return false;
-    if (group && group !== "__none" && !row.groups.has(group)) return false;
+    if (group && group !== "__none" && !row.groups.has(group) && !row.inherited.has(group)) return false;
     if (org === "__none" && row.organization) return false;
     if (org && org !== "__none" && row.organization !== org) return false;
     if (!query) return true;
@@ -192,16 +193,30 @@ function filteredRows() {
   });
 }
 
+/**
+ * Direct groups as their tree path ("Projektering › El"), so nesting shows. When
+ * the list is filtered on a group the user only inherits, that comes first,
+ * marked with the group it comes through.
+ */
 function groupChips(row) {
-  const names = [...row.groups.keys()]
-    .map(groupById)
-    .filter((group) => group && !group.readOnly)
-    .map((group) =>
-      row.adminOf.has(group.id)
-        ? `<span class="chip admin" title="Gruppadmin">★ ${esc(group.name.replace(/^@/, ""))}</span>`
-        : `<span class="chip">${esc(group.name.replace(/^@/, ""))}</span>`,
+  const filter = el.fGroup.value;
+  const chips = [];
+  if (row.inherited.has(filter)) {
+    const via = groupById(row.inherited.get(filter));
+    const group = groupById(filter);
+    chips.push(
+      `<span class="chip inherited hit" title="Ärvd: medlem i ${esc(via.name)}, som ingår i ${esc(group.name)}">${esc(group.path)} <small>via ${esc(via.label)}</small></span>`,
     );
-  return names.join("") || `<span class="muted">–</span>`;
+  }
+  for (const group of [...row.groups.keys()].map(groupById)) {
+    if (!group || group.readOnly) continue;
+    const classes = ["chip", row.adminOf.has(group.id) ? "admin" : "", group.id === filter ? "hit" : ""].join(" ");
+    const title = [row.adminOf.has(group.id) ? "Gruppadmin" : "", group.depth ? `Ingår i ${group.path.split(" › ").slice(0, -1).join(" › ")}` : ""]
+      .filter(Boolean)
+      .join(" · ");
+    chips.push(`<span class="${classes}" title="${esc(title)}">${row.adminOf.has(group.id) ? "★ " : ""}${esc(group.path)}</span>`);
+  }
+  return chips.join("") || `<span class="muted">–</span>`;
 }
 
 function render() {
@@ -258,9 +273,9 @@ function renderActionFields() {
       .join("")}</select>`,
     org: `<input id="a-org" list="org-list" placeholder="Organisation" />`,
     title: `<input id="a-title" placeholder="Titel (tomt = rensa)" />`,
-    addGroup: `<select id="a-group">${groups.map((g) => option(g.id, g.name)).join("")}</select>
+    addGroup: `<select id="a-group">${groups.map((g) => option(g.id, treeLabel(g))).join("")}</select>
       <label class="check"><input id="a-admin" type="checkbox" /> som gruppadmin</label>`,
-    removeGroup: `<select id="a-group">${groups.map((g) => option(g.id, g.name)).join("")}</select>`,
+    removeGroup: `<select id="a-group">${groups.map((g) => option(g.id, treeLabel(g))).join("")}</select>`,
     copy: `<select id="a-project">${state.projects
       .filter((p) => p.id !== state.data?.projectId && !p.inactive)
       .map((p) => option(p.id, p.name))
@@ -318,7 +333,9 @@ async function buildBatchOps() {
       if (action === "addGroup") {
         if (member) skipped.push(`${row.email}: är redan med i ${group.name}`);
         else ops.push(addToGroupOp(projectId, row.email, group, el.actionFields.querySelector("#a-admin")?.checked));
-      } else if (!member) skipped.push(`${row.email}: är inte med i ${group.name}`);
+      } else if (!member && row.inherited.has(group.id))
+        skipped.push(`${row.email}: är med via ${groupById(row.inherited.get(group.id)).name}, ta bort därifrån i stället`);
+      else if (!member) skipped.push(`${row.email}: är inte med i ${group.name}`);
       else if (row.email === keep) skipped.push(`${row.email}: sista gruppadmin i ${group.name}, gruppen måste ha minst en`);
       else ops.push(removeFromGroupOp(projectId, row.email, group, member));
     }
@@ -553,7 +570,14 @@ function openEdit(row) {
         .join("")}</select></label>
       ${isMe(row) ? `<p class="muted">Du kan inte ändra din egen roll.</p>` : ""}
       <fieldset><legend>Grupper</legend><div class="group-grid">
-        ${groups.map((g) => `<label class="check"><input type="checkbox" name="g-${g.id}" ${row.groups.has(g.id) ? "checked" : ""} /> ${esc(g.name)}${row.adminOf.has(g.id) ? ` <span class="muted" title="Gruppadmin">★</span>` : ""}</label>`).join("")}
+        ${groups
+          .map(
+            (g) => `<label class="check" style="padding-left:${g.depth * 18}px"><input type="checkbox" name="g-${g.id}" ${row.groups.has(g.id) ? "checked" : ""} />
+              ${g.depth ? "└ " : ""}${esc(g.name)}${row.adminOf.has(g.id) ? ` <span class="muted" title="Gruppadmin">★</span>` : ""}${
+                row.inherited.has(g.id) ? ` <span class="muted">ärvd via ${esc(groupById(row.inherited.get(g.id)).label)}</span>` : ""
+              }</label>`,
+          )
+          .join("")}
       </div></fieldset>
       <div class="sheet-actions"><button class="primary" type="submit">Förhandsgranska</button></div>
     </form>`,

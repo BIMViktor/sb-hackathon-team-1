@@ -48,9 +48,16 @@ const groupNames = [
   ["9", "@Förvaltning", "", false],
 ];
 
+/** Nested groups: the child is a member of the parent. */
+const mockParents = {
+  "@Projektering_Arkitekt": "@Projektering",
+  "@Projektering_Konstruktör": "@Projektering",
+  "@Projektering_El": "@Projektering",
+};
+
 const memberships = {
   "@Projektledning": ["anna.berg@byggbolaget.se", "gustav.ro@byggbolaget.se"],
-  "@Projektering": ["sara.nilsson@linje.se", "maria.holm@konstruktion.se", "lisa.strom@elprojekt.se"],
+  "@Projektering": ["sara.nilsson@linje.se", "maria.holm@konstruktion.se"],
   "@Projektering_Arkitekt": ["sara.nilsson@linje.se", "johan.ek@linje.se"],
   "@Projektering_Konstruktör": ["maria.holm@konstruktion.se", "omar.haddad@konstruktion.se"],
   "@Projektering_El": ["lisa.strom@elprojekt.se"],
@@ -82,7 +89,7 @@ export function createMockDb() {
     const missing = projectId === mockProjects.at(-1).id ? ["@Projektering_El", "@Förvaltning"] : [];
     const groups = groupNames
       .filter(([, name]) => !missing.includes(name))
-      .map(([id, name, description, readOnly]) => ({ id, name, description, readOnly }));
+      .map(([id, name, description, readOnly]) => ({ id, name, description, readOnly, parent: mockParents[name] ?? null }));
     const groupMembers = [];
     const emails = new Set(members.map((member) => member.email));
     for (const member of members) {

@@ -44,7 +44,7 @@ export function createMatrix({ root, rest, projects, currentProjectId, showPrevi
     </div>
     <div id="mx-head" class="mx-head" hidden>
       <input id="mx-filter" type="search" placeholder="Filtrera användare…" />
-      <span id="mx-legend" class="muted">☐ med i projektet · <span class="mx-out-dot"></span> inte med i projektet ännu</span>
+      <span id="mx-legend" class="muted">★ gruppadmin · ↑ ärvd via undergrupp · <span class="mx-out-dot"></span> inte med i projektet ännu</span>
     </div>
     <div id="mx-table" class="mx-wrap"><p class="empty">Välj en grupp och projekt, tryck Visa.</p></div>
     <div id="mx-bar" class="batch" hidden>
@@ -219,11 +219,17 @@ export function createMatrix({ root, rest, projects, currentProjectId, showPrevi
               const member = Boolean(projectRow);
               const group = findGroup(state.loaded.get(id));
               const admin = Boolean(group && projectRow?.adminOf.has(group.id));
+              const via = group && projectRow?.inherited.get(group.id);
+              const viaName = via && state.loaded.get(id).groupById.get(via)?.name;
               const on = wanted(id, row.email);
               const changed = state.changes.has(keyOf(id, row.email));
-              return `<td class="${member ? "" : "out"} ${changed ? "changed" : ""} ${admin ? "admin" : ""}">
+              return `<td class="${member ? "" : "out"} ${changed ? "changed" : ""} ${admin ? "admin" : ""} ${via ? "inherited" : ""}">
                 <input type="checkbox" data-pid="${esc(id)}" data-email="${esc(row.email)}" ${on ? "checked" : ""}
-                  title="${esc(member ? `${projectName(id)}${admin ? " · gruppadmin" : ""}` : `${projectName(id)}: läggs till i projektet`)}" />
+                  title="${esc(
+                    member
+                      ? `${projectName(id)}${admin ? " · gruppadmin" : ""}${viaName ? ` · ärvd via ${viaName}` : ""}`
+                      : `${projectName(id)}: läggs till i projektet`,
+                  )}" />
               </td>`;
             })
             .join("")}

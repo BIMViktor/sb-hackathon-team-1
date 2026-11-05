@@ -172,6 +172,10 @@ export function mockRest() {
           id: g.id,
           type: "groups",
           attributes: { name: g.name, description: g.description, organization: "", "is-read-only": g.readOnly },
+          relationships: {
+            "child-groups": { data: p.groups.filter((c) => c.parent === g.name).map((c) => ({ type: "groups", id: c.id })) },
+            "parent-groups": { data: [] },
+          },
         })),
       };
     }
@@ -242,8 +246,11 @@ export async function loadProject(rest, projectId) {
       name: g.attributes?.name ?? g.id,
       description: g.attributes?.description ?? "",
       readOnly: Boolean(g.attributes?.["is-read-only"] || g.attributes?.["is-imported"]),
+      parentIds: (g.relationships?.["parent-groups"]?.data ?? []).map((r) => String(r.id)),
+      childIds: (g.relationships?.["child-groups"]?.data ?? []).map((r) => String(r.id)),
     }))
     .sort((a, b) => a.name.localeCompare(b.name, "sv"));
+  const groupTree = buildGroupTree(groupList);
 
   const rows = (members?.data ?? []).map((m) => {
     const a = m.attributes ?? {};
@@ -277,8 +284,62 @@ export async function loadProject(rest, projectId) {
     row.groups.set(String(relId(gm, "group")), String(gm.id));
     if (gm.attributes?.["is-admin"]) row.adminOf.add(String(relId(gm, "group")));
   }
+  for (const row of rows) row.inherited = inheritedGroups(row.groups, groupTree.byId);
   rows.sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email, "sv"));
-  return { projectId, rows, rowByEmail, groups: groupList };
+  return { projectId, rows, rowByEmail, groups: groupTree.ordered, groupById: groupTree.byId };
+}
+
+/**
+ * Groups nest: a child group is a member of its parent, so the child's members
+ * belong to the parent too. Links are read from both parent-groups and
+ * child-groups. Returns the groups in tree order, each with `depth`, `parents`,
+ * `children`, a short `label` and a `path` like "Projektering › El".
+ */
+function buildGroupTree(list) {
+  const byId = new Map(list.map((g) => [g.id, { ...g, parents: new Set(), children: new Set() }]));
+  for (const g of byId.values()) {
+    for (const id of g.parentIds) if (byId.has(id) && id !== g.id) (g.parents.add(id), byId.get(id).children.add(g.id));
+    for (const id of g.childIds) if (byId.has(id) && id !== g.id) (g.children.add(id), byId.get(id).parents.add(g.id));
+  }
+  const bare = (g) => g.name.replace(/^@/, "");
+  const ordered = [];
+  const placed = new Set();
+  const visit = (g, depth, trail) => {
+    if (trail.includes(g.id)) return;
+    const parent = byId.get(trail.at(-1));
+    if (!placed.has(g.id)) {
+      placed.add(g.id);
+      g.depth = depth;
+      g.label = parent && bare(g).startsWith(`${bare(parent)}_`) ? bare(g).slice(bare(parent).length + 1) : bare(g);
+      g.path = trail.map((id) => byId.get(id).label).concat(g.label).join(" › ");
+      ordered.push(g);
+    }
+    [...g.children]
+      .map((id) => byId.get(id))
+      .sort((a, b) => a.name.localeCompare(b.name, "sv"))
+      .forEach((child) => visit(child, depth + 1, [...trail, g.id]));
+  };
+  const sorted = [...byId.values()].sort((a, b) => a.name.localeCompare(b.name, "sv"));
+  for (const g of sorted) if (!g.parents.size) visit(g, 0, []);
+  for (const g of sorted) visit(g, 0, []); // cycles without a root
+  return { ordered, byId };
+}
+
+/** Groups a user belongs to through a child group: groupId → the direct group it comes through. */
+function inheritedGroups(direct, byId) {
+  const inherited = new Map();
+  for (const id of direct.keys()) {
+    const queue = [...(byId.get(id)?.parents ?? [])];
+    const seen = new Set([id]);
+    while (queue.length) {
+      const parent = queue.shift();
+      if (seen.has(parent)) continue;
+      seen.add(parent);
+      if (!direct.has(parent) && !inherited.has(parent)) inherited.set(parent, id);
+      queue.push(...(byId.get(parent)?.parents ?? []));
+    }
+  }
+  return inherited;
 }
 
 /**
