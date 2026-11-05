@@ -11,6 +11,7 @@ import {
   WRITE_GAP_MS,
   addMemberOp,
   addToGroupOp,
+  lastAdminKept,
   levelName,
   liveRest,
   loadOrganizations,
@@ -195,7 +196,11 @@ function groupChips(row) {
   const names = [...row.groups.keys()]
     .map(groupById)
     .filter((group) => group && !group.readOnly)
-    .map((group) => `<span class="chip">${esc(group.name.replace(/^@/, ""))}</span>`);
+    .map((group) =>
+      row.adminOf.has(group.id)
+        ? `<span class="chip admin" title="Gruppadmin">★ ${esc(group.name.replace(/^@/, ""))}</span>`
+        : `<span class="chip">${esc(group.name.replace(/^@/, ""))}</span>`,
+    );
   return names.join("") || `<span class="muted">–</span>`;
 }
 
@@ -306,12 +311,15 @@ async function buildBatchOps() {
   if (action === "addGroup" || action === "removeGroup") {
     const group = groupById(val("#a-group"));
     if (!group) throw new Error("Välj en grupp.");
+    const keep =
+      action === "removeGroup" ? lastAdminKept(state.data, group.id, rows.filter((row) => row.groups.has(group.id)).map((row) => row.email)) : null;
     for (const row of rows) {
       const member = row.groups.get(group.id);
       if (action === "addGroup") {
         if (member) skipped.push(`${row.email}: är redan med i ${group.name}`);
         else ops.push(addToGroupOp(projectId, row.email, group, el.actionFields.querySelector("#a-admin")?.checked));
       } else if (!member) skipped.push(`${row.email}: är inte med i ${group.name}`);
+      else if (row.email === keep) skipped.push(`${row.email}: sista gruppadmin i ${group.name}, gruppen måste ha minst en`);
       else ops.push(removeFromGroupOp(projectId, row.email, group, member));
     }
   }
@@ -356,6 +364,7 @@ async function buildBatchOps() {
 function buildEditOps(row, form) {
   const projectId = state.data.projectId;
   const ops = [];
+  const skipped = [];
   const read = (name) => form.elements[name].value.trim();
   const attrs = {};
   if (read("given") !== row.given) attrs["given-name"] = read("given");
@@ -381,9 +390,12 @@ function buildEditOps(row, form) {
     const want = form.elements[`g-${group.id}`].checked;
     const member = row.groups.get(group.id);
     if (want && !member) ops.push(addToGroupOp(projectId, row.email, group));
-    if (!want && member) ops.push(removeFromGroupOp(projectId, row.email, group, member));
+    if (!want && member) {
+      if (lastAdminKept(state.data, group.id, [row.email])) skipped.push(`Sista gruppadmin i ${group.name}, gruppen måste ha minst en`);
+      else ops.push(removeFromGroupOp(projectId, row.email, group, member));
+    }
   }
-  return ops;
+  return { ops, skipped };
 }
 
 /** CSV/TSV: e-post;förnamn;efternamn;organisation;titel;roll;grupper (grupper separerade med |). */
@@ -541,14 +553,15 @@ function openEdit(row) {
         .join("")}</select></label>
       ${isMe(row) ? `<p class="muted">Du kan inte ändra din egen roll.</p>` : ""}
       <fieldset><legend>Grupper</legend><div class="group-grid">
-        ${groups.map((g) => `<label class="check"><input type="checkbox" name="g-${g.id}" ${row.groups.has(g.id) ? "checked" : ""} /> ${esc(g.name)}</label>`).join("")}
+        ${groups.map((g) => `<label class="check"><input type="checkbox" name="g-${g.id}" ${row.groups.has(g.id) ? "checked" : ""} /> ${esc(g.name)}${row.adminOf.has(g.id) ? ` <span class="muted" title="Gruppadmin">★</span>` : ""}</label>`).join("")}
       </div></fieldset>
       <div class="sheet-actions"><button class="primary" type="submit">Förhandsgranska</button></div>
     </form>`,
   );
   el.sheetBody.querySelector("#edit").addEventListener("submit", (event) => {
     event.preventDefault();
-    showPreview(buildEditOps(row, event.currentTarget));
+    const { ops, skipped } = buildEditOps(row, event.currentTarget);
+    showPreview(ops, skipped);
   });
 }
 

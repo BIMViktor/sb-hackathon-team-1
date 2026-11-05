@@ -92,8 +92,8 @@ export function createMockDb() {
     for (const [name, list] of Object.entries(memberships)) {
       const group = groups.find((item) => item.name === name);
       if (!group) continue;
-      for (const email of list) {
-        if (emails.has(email)) groupMembers.push({ id: String(nextId++), group: group.id, user: email, admin: false });
+      for (const [i, email] of list.entries()) {
+        if (emails.has(email)) groupMembers.push({ id: String(nextId++), group: group.id, user: email, admin: i === 0 });
       }
     }
     return { members, groups, groupMembers };

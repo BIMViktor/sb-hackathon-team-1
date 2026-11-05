@@ -4,7 +4,7 @@
  * users who are not in a project are added (as Användare) first.
  */
 
-import { WRITE_GAP_MS, addMemberOp, addToGroupOp, createGroupOp, loadProject, removeFromGroupOp } from "./data.js";
+import { WRITE_GAP_MS, addMemberOp, addToGroupOp, createGroupOp, lastAdminKept, loadProject, removeFromGroupOp } from "./data.js";
 import { esc } from "./ui.js";
 
 const MAX_PROJECTS = 15;
@@ -207,15 +207,23 @@ export function createMatrix({ root, rest, projects, currentProjectId, showPrevi
     const body = rows
       .map(
         (row) => `<tr>
-          <th class="mx-user"><b>${esc(row.name || row.email)}</b><small>${esc(row.email)}</small></th>
+          <th class="mx-user"><div class="mx-uwrap">
+            <div><b>${esc(row.name || row.email)}</b><small>${esc(row.email)}</small></div>
+            <label class="check mx-rowall" title="Markera i alla projekt"><input type="checkbox" data-row="${esc(row.email)}" ${
+              state.shown.every((id) => wanted(id, row.email)) ? "checked" : ""
+            } /> alla</label>
+          </div></th>
           ${state.shown
             .map((id) => {
-              const member = state.loaded.get(id).rowByEmail.has(row.email);
+              const projectRow = state.loaded.get(id).rowByEmail.get(row.email);
+              const member = Boolean(projectRow);
+              const group = findGroup(state.loaded.get(id));
+              const admin = Boolean(group && projectRow?.adminOf.has(group.id));
               const on = wanted(id, row.email);
               const changed = state.changes.has(keyOf(id, row.email));
-              return `<td class="${member ? "" : "out"} ${changed ? "changed" : ""}">
+              return `<td class="${member ? "" : "out"} ${changed ? "changed" : ""} ${admin ? "admin" : ""}">
                 <input type="checkbox" data-pid="${esc(id)}" data-email="${esc(row.email)}" ${on ? "checked" : ""}
-                  title="${esc(member ? projectName(id) : `${projectName(id)}: läggs till i projektet`)}" />
+                  title="${esc(member ? `${projectName(id)}${admin ? " · gruppadmin" : ""}` : `${projectName(id)}: läggs till i projektet`)}" />
               </td>`;
             })
             .join("")}
@@ -246,6 +254,10 @@ export function createMatrix({ root, rest, projects, currentProjectId, showPrevi
       for (const row of people()) setWanted(box.dataset.col, row.email, box.checked);
       return render();
     }
+    if (box.dataset.row) {
+      for (const id of state.shown) setWanted(id, box.dataset.row, box.checked);
+      return render();
+    }
     if (!box.dataset.pid) return;
     setWanted(box.dataset.pid, box.dataset.email, box.checked);
     box.closest("td").classList.toggle("changed", state.changes.has(keyOf(box.dataset.pid, box.dataset.email)));
@@ -269,7 +281,11 @@ export function createMatrix({ root, rest, projects, currentProjectId, showPrevi
       if (!changes.length) continue;
       const existing = findGroup(data);
       const group = existing ? { ...existing } : { id: null, name: state.groupName };
-      if (!existing && changes.some(([, on]) => on)) ops.push(createGroupOp(id, projectName(id), group));
+      // A group must keep at least one group admin: a new group gets its first member as admin,
+      // and the last admin of an existing group is not removed.
+      let needsAdmin = !existing;
+      if (needsAdmin && changes.some(([, on]) => on)) ops.push(createGroupOp(id, projectName(id), group));
+      const keep = existing ? lastAdminKept(data, existing.id, changes.filter(([, on]) => !on).map(([email]) => email)) : null;
       for (const [email, on] of changes) {
         const row = data.rowByEmail.get(email);
         if (on) {
@@ -292,9 +308,12 @@ export function createMatrix({ root, rest, projects, currentProjectId, showPrevi
               ),
             );
           }
-          const op = addToGroupOp(id, email, group);
-          op.label = `${projectName(id)}: lägg till i ${group.name}`;
+          const op = addToGroupOp(id, email, group, needsAdmin);
+          op.label = `${projectName(id)}: lägg till i ${group.name}${needsAdmin ? " som gruppadmin" : ""}`;
+          needsAdmin = false;
           ops.push(op);
+        } else if (email === keep) {
+          skipped.push(`${email}: sista gruppadmin i ${existing.name} i ${projectName(id)}, gruppen måste ha minst en`);
         } else if (row && existing && row.groups.has(existing.id)) {
           const op = removeFromGroupOp(id, email, existing, row.groups.get(existing.id));
           op.label = `${projectName(id)}: ta bort från ${existing.name}`;

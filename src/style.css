@@ -448,3 +448,9 @@ legend { padding: 0 4px; color: var(--muted); font-size: 12px; }
 .mx td.out { background: repeating-linear-gradient(135deg, transparent 0 6px, #f3f5f8 6px 8px); }
 .mx td.changed { background: var(--warn-soft); }
 .mx tbody tr:hover th, .mx tbody tr:hover td:not(.changed) { background-color: #f4f7fa; }
+
+.chip.admin { background: var(--accent-soft); color: var(--accent); }
+.mx td.admin::after { content: "★"; margin-left: 2px; color: var(--accent); font-size: 10px; vertical-align: top; }
+.mx-uwrap { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.mx-uwrap > div { min-width: 0; }
+.mx-rowall { flex: none; color: var(--muted); font-size: 11px; }

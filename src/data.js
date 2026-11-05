@@ -192,6 +192,9 @@ export function mockRest() {
       if (method === "DELETE") {
         const index = p.groupMembers.findIndex((item) => item.id === id);
         if (index < 0) fail(`DELETE ${path}: okänt svar`);
+        const gm = p.groupMembers[index];
+        const admins = p.groupMembers.filter((item) => item.group === gm.group && item.admin);
+        if (gm.admin && admins.length === 1) fail(`DELETE ${path}: okänt svar`);
         p.groupMembers.splice(index, 1);
         return { data: null };
       }
@@ -263,16 +266,31 @@ export async function loadProject(rest, projectId) {
       invited: Boolean(a.invited),
       lastLogin: a["last-login"] || null,
       groups: new Map(),
+      adminOf: new Set(),
     };
   });
 
   const rowByEmail = new Map(rows.map((row) => [row.email, row]));
   for (const gm of groupMembers?.data ?? []) {
     const row = rowByEmail.get(relId(gm, "user"));
-    if (row) row.groups.set(String(relId(gm, "group")), String(gm.id));
+    if (!row) continue;
+    row.groups.set(String(relId(gm, "group")), String(gm.id));
+    if (gm.attributes?.["is-admin"]) row.adminOf.add(String(relId(gm, "group")));
   }
   rows.sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email, "sv"));
   return { projectId, rows, rowByEmail, groups: groupList };
+}
+
+/**
+ * StreamBIM refuses to remove a group's last group admin (403
+ * theGroupNeedsToHaveAtLeastOneGroupAdmin). Given the emails about to leave
+ * `groupId`, return the one that must stay, or null.
+ */
+export function lastAdminKept(data, groupId, leaving) {
+  const admins = data.rows.filter((row) => row.adminOf.has(groupId)).map((row) => row.email);
+  const out = new Set(leaving);
+  if (!admins.length || admins.some((email) => !out.has(email))) return null;
+  return admins.find((email) => out.has(email));
 }
 
 /* ---------- Operations: one REST write each, with a check for blind results ---------- */
