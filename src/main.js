@@ -24,6 +24,7 @@ import {
   removeFromGroupOp,
   runOps,
 } from "./data.js";
+import { createGroupBuilder } from "./groupbuilder.js";
 import { createMatrix } from "./matrix.js";
 import { mockMe, mockProjects } from "./mock-users.js";
 import { connectWidget } from "./streambim.js";
@@ -60,6 +61,7 @@ const el = {
   tabs: $("#tabs"),
   usersView: $("#users-view"),
   matrixView: $("#matrix-view"),
+  groupsView: $("#groups-view"),
 };
 
 const ctx = { rest: null, projectId: "", userEmail: "", mode: "" };
@@ -70,6 +72,7 @@ const state = {
   selected: new Set(),
   running: null,
   matrix: null,
+  groupBuilder: null,
 };
 
 /* ---------- helpers ---------- */
@@ -267,7 +270,7 @@ function render() {
 
 function renderBatch() {
   const n = state.selected.size;
-  el.batch.hidden = n === 0 || !el.matrixView.hidden;
+  el.batch.hidden = n === 0 || el.usersView.hidden;
   el.batchCount.textContent = `${n} valda`;
 }
 
@@ -794,20 +797,28 @@ el.tabs.addEventListener("click", (event) => {
   const tab = event.target.closest("[data-tab]");
   if (!tab || !ctx.rest) return;
   for (const button of el.tabs.querySelectorAll("[data-tab]")) button.setAttribute("aria-selected", String(button === tab));
-  const matrix = tab.dataset.tab === "matrix";
-  el.usersView.hidden = matrix;
+  const name = tab.dataset.tab;
+  const matrix = name === "matrix";
+  const groups = name === "groups";
+  el.usersView.hidden = name !== "users";
   el.matrixView.hidden = !matrix;
-  el.batch.hidden = matrix || state.selected.size === 0;
+  el.groupsView.hidden = !groups;
+  el.batch.hidden = name !== "users" || state.selected.size === 0;
+  const projects = state.projects.length ? state.projects : [{ id: ctx.projectId, name: `Projekt ${ctx.projectId}` }];
   if (matrix && !state.matrix) {
     state.matrix = createMatrix({
       root: el.matrixView,
       rest: ctx.rest,
-      projects: state.projects.length ? state.projects : [{ id: ctx.projectId, name: `Projekt ${ctx.projectId}` }],
+      projects,
       currentProjectId: ctx.projectId,
       showPreview,
       log,
     });
     if (state.data) state.matrix.seed(state.data);
+  }
+  if (groups && !state.groupBuilder) {
+    state.groupBuilder = createGroupBuilder({ root: el.groupsView, rest: ctx.rest, projects, currentProjectId: ctx.projectId, showPreview });
+    if (state.data) state.groupBuilder.seed(state.data);
   }
 });
 
