@@ -18,6 +18,12 @@
         </div>
       </header>
 
+      <nav id="tabs" class="tabs" role="tablist">
+        <button type="button" role="tab" data-tab="users" aria-selected="true">Användare</button>
+        <button type="button" role="tab" data-tab="matrix" aria-selected="false">Grupp × projekt</button>
+      </nav>
+
+      <section id="users-view" class="view">
       <div class="project-row">
         <select id="project" aria-label="Projekt"></select>
         <button id="reload" type="button" class="ghost icon" title="Läs om">↻</button>
@@ -39,6 +45,9 @@
       </div>
 
       <div id="list" class="list"><p class="empty">Laddar…</p></div>
+      </section>
+
+      <section id="matrix-view" class="view" hidden></section>
 
       <div id="batch" class="batch" hidden>
         <span id="batch-count" class="batch-count"></span>

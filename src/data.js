@@ -159,6 +159,13 @@ export function mockRest() {
         })),
       };
     }
+    if (resource === "groups" && method === "POST") {
+      const name = body?.data?.attributes?.name;
+      if (!name || p.groups.some((g) => g.name === name)) fail(`POST ${path}: okänt svar`);
+      const group = { id: db.nextId(), name, description: "", readOnly: false };
+      p.groups.push(group);
+      return { data: { id: group.id, type: "groups", attributes: { name } } };
+    }
     if (resource === "groups" && method === "GET") {
       return {
         data: p.groups.map((g) => ({
@@ -344,18 +351,58 @@ export function addToGroupOp(projectId, email, group, admin = false) {
     who: email,
     method: "POST",
     path: `${base(projectId)}/group-members`,
-    body: {
-      data: {
-        type: "group-members",
-        attributes: { "is-admin": admin },
-        relationships: {
-          group: { data: { type: "groups", id: group.id } },
-          user: { data: { type: "users", id: email } },
+    // `group` may be a group that a createGroupOp earlier in the batch creates; its id is filled in then.
+    ready: () => Boolean(group.id),
+    get body() {
+      return {
+        data: {
+          type: "group-members",
+          attributes: { "is-admin": admin },
+          relationships: {
+            group: { data: { type: "groups", id: group.id } },
+            user: { data: { type: "users", id: email } },
+          },
         },
-      },
+      };
     },
     async check(rest, cache) {
-      return inGroup(await groupMembers(rest, projectId, cache), group.id, email);
+      return Boolean(group.id) && inGroup(await groupMembers(rest, projectId, cache), group.id, email);
+    },
+  };
+}
+
+/**
+ * Create a group in a project and write its id into `group` (a { id, name }
+ * object later operations share). NOT verified live: the documented-looking
+ * body was rejected on 2026-11-05. The op re-reads the groups to confirm.
+ */
+export function createGroupOp(projectId, projectName, group) {
+  const path = `${base(projectId)}/groups`;
+  const findId = async (rest) => {
+    const res = await rest(path);
+    const found = (res?.data ?? []).find((g) => g.attributes?.name === group.name);
+    return found ? String(found.id) : null;
+  };
+  return {
+    label: `Skapa gruppen ${group.name}`,
+    who: projectName,
+    method: "POST",
+    path,
+    async run(rest) {
+      try {
+        const res = await rest(path, {
+          method: "POST",
+          body: { data: { type: "groups", attributes: { name: group.name, description: "", organization: "" } } },
+        });
+        if (res?.data?.id) group.id = String(res.data.id);
+      } catch (error) {
+        if (!error.blind) throw error;
+      }
+      group.id ??= await findId(rest);
+      if (!group.id) throw new RestError("StreamBIM skapade inte gruppen.", false);
+    },
+    async check() {
+      return Boolean(group.id);
     },
   };
 }
@@ -383,10 +430,17 @@ export async function runOps(rest, ops, onUpdate, signal = {}) {
   onUpdate();
   for (const op of ops) {
     if (signal.stopped) break;
+    if (op.ready && !op.ready()) {
+      op.status = "fel";
+      op.error = "Ett tidigare steg misslyckades.";
+      onUpdate();
+      continue;
+    }
     op.status = "kör";
     onUpdate();
     try {
-      await rest(op.path, { method: op.method, body: op.body });
+      if (op.run) await op.run(rest);
+      else await rest(op.path, { method: op.method, body: op.body });
       op.status = "ok";
     } catch (error) {
       op.status = error.blind ? "kontrollerar" : "fel";

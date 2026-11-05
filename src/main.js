@@ -22,8 +22,10 @@ import {
   removeFromGroupOp,
   runOps,
 } from "./data.js";
+import { createMatrix } from "./matrix.js";
 import { mockMe, mockProjects } from "./mock-users.js";
 import { connectWidget } from "./streambim.js";
+import { esc, option } from "./ui.js";
 import "./style.css";
 
 const $ = (selector) => document.querySelector(selector);
@@ -53,6 +55,9 @@ const el = {
   sheetBody: $("#sheet-body"),
   sheetClose: $("#sheet-close"),
   orgList: $("#org-list"),
+  tabs: $("#tabs"),
+  usersView: $("#users-view"),
+  matrixView: $("#matrix-view"),
 };
 
 const ctx = { rest: null, projectId: "", userEmail: "", mode: "" };
@@ -62,20 +67,14 @@ const state = {
   data: null,
   selected: new Set(),
   running: null,
+  matrix: null,
 };
 
 /* ---------- helpers ---------- */
 
-const esc = (value) =>
-  String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-
 function log(message, kind = "") {
   el.log.textContent = message;
   el.log.dataset.kind = kind;
-}
-
-function option(value, label, selected = false) {
-  return `<option value="${esc(value)}"${selected ? " selected" : ""}>${esc(label)}</option>`;
 }
 
 const writableGroups = () => (state.data?.groups ?? []).filter((group) => !group.readOnly);
@@ -241,7 +240,7 @@ function render() {
 
 function renderBatch() {
   const n = state.selected.size;
-  el.batch.hidden = n === 0;
+  el.batch.hidden = n === 0 || !el.matrixView.hidden;
   el.batchCount.textContent = `${n} valda`;
 }
 
@@ -471,7 +470,7 @@ function closeSheet() {
   el.sheetBody.innerHTML = "";
 }
 
-function showPreview(ops, skipped = []) {
+function showPreview(ops, skipped = [], onDone = () => loadAll(el.project.value)) {
   const people = new Set(ops.map((op) => op.who)).size;
   const seconds = Math.ceil((ops.length * WRITE_GAP_MS) / 1000);
   openSheet(
@@ -489,10 +488,10 @@ function showPreview(ops, skipped = []) {
     if (state.running) state.running.stopped = true;
     else closeSheet();
   });
-  el.sheetBody.querySelector("#run")?.addEventListener("click", (event) => execute(ops, event.currentTarget));
+  el.sheetBody.querySelector("#run")?.addEventListener("click", (event) => execute(ops, event.currentTarget, onDone));
 }
 
-async function execute(ops, runBtn) {
+async function execute(ops, runBtn, onDone) {
   const signal = { stopped: false };
   state.running = signal;
   runBtn.disabled = true;
@@ -517,7 +516,7 @@ async function execute(ops, runBtn) {
   cancel.textContent = "Stäng";
   const summary = `${ok} lyckades${failed ? `, ${failed} misslyckades` : ""}${stopped ? `, ${stopped} stoppades` : ""}.`;
   el.sheetBody.querySelector(".lead").textContent = summary + (failed ? " Håll muspekaren över en rad för detaljer." : "");
-  await loadAll(el.project.value);
+  await onDone();
   log(summary, failed ? "error" : "ok");
 }
 
@@ -669,6 +668,27 @@ document.addEventListener("keydown", (event) => event.key === "Escape" && closeS
 el.popout.addEventListener("click", () => {
   const win = window.open(`${location.pathname}?popout=1`, "user-manager", "popup,width=1280,height=820");
   if (!win) log("Webbläsaren blockerade fönstret. Tillåt popup-fönster för StreamBIM.", "error");
+});
+
+el.tabs.addEventListener("click", (event) => {
+  const tab = event.target.closest("[data-tab]");
+  if (!tab || !ctx.rest) return;
+  for (const button of el.tabs.querySelectorAll("[data-tab]")) button.setAttribute("aria-selected", String(button === tab));
+  const matrix = tab.dataset.tab === "matrix";
+  el.usersView.hidden = matrix;
+  el.matrixView.hidden = !matrix;
+  el.batch.hidden = matrix || state.selected.size === 0;
+  if (matrix && !state.matrix) {
+    state.matrix = createMatrix({
+      root: el.matrixView,
+      rest: ctx.rest,
+      projects: state.projects.length ? state.projects : [{ id: ctx.projectId, name: `Projekt ${ctx.projectId}` }],
+      currentProjectId: ctx.projectId,
+      showPreview,
+      log,
+    });
+    if (state.data) state.matrix.seed(state.data);
+  }
 });
 
 /* ---------- start ---------- */

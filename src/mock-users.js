@@ -78,7 +78,11 @@ export function createMockDb() {
       invited: false,
       lastLogin: level ? "2026-10-2" + (email.length % 9) + "T08:15:00Z" : null,
     }));
-    const groups = groupNames.map(([id, name, description, readOnly]) => ({ id, name, description, readOnly }));
+    // The last project lacks a few groups, so the group × project view has something to create.
+    const missing = projectId === mockProjects.at(-1).id ? ["@Projektering_El", "@Förvaltning"] : [];
+    const groups = groupNames
+      .filter(([, name]) => !missing.includes(name))
+      .map(([id, name, description, readOnly]) => ({ id, name, description, readOnly }));
     const groupMembers = [];
     const emails = new Set(members.map((member) => member.email));
     for (const member of members) {
@@ -87,6 +91,7 @@ export function createMockDb() {
     }
     for (const [name, list] of Object.entries(memberships)) {
       const group = groups.find((item) => item.name === name);
+      if (!group) continue;
       for (const email of list) {
         if (emails.has(email)) groupMembers.push({ id: String(nextId++), group: group.id, user: email, admin: false });
       }
